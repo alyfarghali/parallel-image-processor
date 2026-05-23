@@ -6,15 +6,19 @@ Python multiprocessing pipeline that applies image filters in parallel across CP
 
 This project explores embarrassingly parallel computation — a class of problems where a workload can be split into independent units with no communication between them, making them ideal for parallel execution. The same principle underlies many high-performance computing (HPC) workflows, where tasks are distributed across hundreds or thousands of cores simultaneously.
 
-The program loads an image, splits it into horizontal strips (one per CPU core), applies a filter to each strip simultaneously using Python's `multiprocessing` module, and reassembles the result with NumPy. Both a parallel and sequential version are timed and compared.
+Two parallelism strategies are implemented and benchmarked:
+
+- **Strip-based**: one image split into horizontal strips, one strip per core
+- **Multi-image**: multiple images processed simultaneously, one image per core
 
 ## Features
 
 - Parallel image processing using `multiprocessing.Pool`
 - Three filters: blur, grayscale, sharpen
+- Two parallelism strategies: strip-based and multi-image
 - Automatic core detection via `multiprocessing.cpu_count()`
 - Sequential vs. parallel benchmark with speedup measurement
-- Output saved as a new image file
+- Output saved as new image files
 
 ## Requirements
 
@@ -24,59 +28,49 @@ pip install Pillow numpy
 
 ## Usage
 
-1. Place any `.jpg` image in the project directory and rename it `input.jpg`
-2. Run the script:
+1. Place image files in the project directory
+2. Activate your virtual environment:
 
 ```bash
-python image_processor.py
+source venv/bin/activate
 ```
 
-3. The processed image is saved as `output.jpg`
+3. Run the script:
 
-## Example Output
-
-```
-Image size: (4032, 3024)
-Cores available: 8
-Filter: blur
-
-Sequential time: 3.8421s
-Parallel time:   1.0243s
-Speedup:         3.75x
-
-Saved output.jpg
+```bash
+python3 processor.py
 ```
 
-## How it works
+## Benchmark Results
 
-The image array is split along the horizontal axis into N strips, where N equals the number of available CPU cores. Each strip is passed as an argument to a worker process via `multiprocessing.Pool.map()`. Each worker applies the filter independently — no data is shared between processes during execution. The processed strips are returned and reassembled using `numpy.vstack()`.
+### Strategy 1: Strip-based (one image split across cores)
 
-```
-Original image
-      │
-      ▼
-┌─────────────┐
-│   Strip 1   │  → Core 0 → filter → result strip 1
-│   Strip 2   │  → Core 1 → filter → result strip 2
-│   Strip 3   │  → Core 2 → filter → result strip 3
-│   Strip 4   │  → Core 3 → filter → result strip 4
-└─────────────┘
-      │
-      ▼
-numpy.vstack() → output image
-```
+Parallel was slower than sequential across all tested environments. The filter computation per strip is lightweight enough that process spawning overhead dominates — a classic case of overhead dominance on small workloads.
+
+### Strategy 2: Multi-image (one full image per core)
+
+Processing multiple independent images in parallel outperformed sequential processing on Linux x86. With enough images, the total work per run grows while overhead stays fixed, allowing parallelism to pay off.
+
+**Key finding:** multi-image parallelism outperforms strip-based parallelism for this workload because each worker receives a full, compute-heavy job with no inter-process dependencies.
 
 ## What I learned
 
-Parallel speedup is not linear or guaranteed. Lightweight filters like grayscale show less speedup than compute-heavy ones like Gaussian blur because the overhead of spawning processes becomes significant relative to the work being done. This mirrors a key HPC concept: parallelism is most valuable when the computation per unit of work is high relative to the communication and coordination cost.
+**Parallel computing is not always faster.** When the computation per unit of work is small relative to the cost of spawning and coordinating processes, sequential processing wins. This is known as overhead dominance.
 
-## Files
+**Workload design matters.** Strip-based parallelism on a single image loses because each strip is too lightweight. Multi-image parallelism wins because each worker gets a complete, independent job.
+
+**Architecture affects performance.** Apple Silicon's unified memory architecture makes Python multiprocessing less effective than on Linux x86 — the architecture used in production HPC clusters like Georgia Tech's PACE Phoenix cluster. The same code produces different results depending on the underlying hardware.
+
+**Amdahl's Law is real.** The theoretical maximum speedup is bounded by the number of cores and the fraction of work that can be parallelized. Fixed overhead costs set a floor that parallelism cannot overcome on small workloads, no matter how many cores are available.
+
+**More work favors parallelism.** As the number of images increases, the fixed overhead cost becomes a smaller fraction of total runtime and speedup improves. This mirrors how HPC schedulers like Slurm manage large job queues — parallelism pays off at scale.
+
+## Project Structure
 
 | File | Description |
 |---|---|
-| `image_processor.py` | Main script — parallel and sequential processing with benchmark |
-| `input.jpg` | Input image (not tracked) |
-| `output.jpg` | Processed output (not tracked) |
+| `processor.py` | Strip-based parallelism strategy with benchmark |
+| `processor2.py` | Multi-image parallelism strategy with benchmark |
 
 ## License
 
